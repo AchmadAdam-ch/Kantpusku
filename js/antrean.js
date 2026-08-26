@@ -1,96 +1,193 @@
 // ==========================================
-// 1. DATA REFERENSI (Sama seperti di Dashboard)
+// 1. TANGKAP ID PUSKESMAS DARI URL PARAMETER
 // ==========================================
-const dataPuskesmas = [
-    {
-        nama: "Puskesmas Melati",
-        alamat: "Jl. Kesehatan No. 1, Jakarta",
-        poli: ["Poli Umum", "Poli Gigi", "Poli KIA"]
-    },
-    {
-        nama: "Puskesmas Mawar",
-        alamat: "Jl. Kesembuhan No. 2, Bandung",
-        poli: ["Poli Umum", "Poli Anak"]
-    },
-    {
-        nama: "Puskesmas Anggrek",
-        alamat: "Jl. Kebugaran No. 3, Surabaya",
-        poli: ["Poli Umum", "Poli Gigi", "Poli Mata", "Poli Gizi"]
-    }
-];
-
-// ==========================================
-// 2. TANGKAP ID PUSKESMAS DARI URL PARAMETER
-// ==========================================
-// Mengambil text "?id=X" dari URL browser
 const urlParams = new URLSearchParams(window.location.search);
-const puskesmasId = urlParams.get('id');
+const puskesmasId = parseInt(urlParams.get('id'));
 
-// Proteksi jika ID tidak valid atau langsung buka antrean.html tanpa klik dari dashboard
-if (puskesmasId === null || !dataPuskesmas[puskesmasId]) {
-    alert("Puskesmas tidak valid! Kembali ke Dashboard.");
-    window.location.href = "dashboard.html";
+let puskesmasTerpilih = null;
+
+// Menyimpan data tiket terakhir yang berhasil dibuat, dipakai untuk PDF/Email/WhatsApp
+let tiketTerakhir = null;
+
+// ==========================================
+// TUJUAN TETAP UNTUK KIRIM EMAIL & WHATSAPP
+// (sesuai ketetapan project, tidak perlu diisi manual oleh pengguna)
+// ==========================================
+const EMAIL_TUJUAN_TETAP = 'ohd8094@gmail.com';
+const WA_TUJUAN_TETAP = '089653737422';
+
+// ==========================================
+// 2. AMBIL DATA PUSKESMAS DARI DATABASE (via PHP + MySQL)
+// ==========================================
+async function muatDataPuskesmas() {
+    if (!puskesmasId) {
+        alert("Puskesmas tidak valid! Kembali ke Dashboard.");
+        window.location.href = "dashboard.html";
+        return;
+    }
+
+    try {
+        const response = await fetch('api/get_puskesmas.php');
+        const hasil = await response.json();
+
+        if (!hasil.success) {
+            alert("Gagal memuat data puskesmas.");
+            window.location.href = "dashboard.html";
+            return;
+        }
+
+        puskesmasTerpilih = hasil.data.find(p => parseInt(p.id) === puskesmasId);
+
+        if (!puskesmasTerpilih) {
+            alert("Puskesmas tidak valid! Kembali ke Dashboard.");
+            window.location.href = "dashboard.html";
+            return;
+        }
+
+        // Tampilkan nama & alamat puskesmas di form
+        document.getElementById('namaPuskesmasLabel').textContent = puskesmasTerpilih.nama;
+        document.getElementById('alamatPuskesmasLabel').textContent = puskesmasTerpilih.alamat;
+
+        // Isi pilihan poli secara dinamis
+        const pilihPoliSelect = document.getElementById('pilihPoli');
+        puskesmasTerpilih.poli.forEach(poli => {
+            const opsi = document.createElement('option');
+            opsi.value = poli;
+            opsi.textContent = poli;
+            pilihPoliSelect.appendChild(opsi);
+        });
+    } catch (error) {
+        alert("Gagal terhubung ke server. Pastikan Apache & MySQL di XAMPP sudah berjalan.");
+        console.error(error);
+    }
 }
-
-// Ambil data puskesmas terpilih berdasarkan ID-nya
-const puskesmasTerpilih = dataPuskesmas[puskesmasId];
-
-// Tampilkan nama & alamat puskesmas di form
-document.getElementById('namaPuskesmasLabel').textContent = puskesmasTerpilih.nama;
-document.getElementById('alamatPuskesmasLabel').textContent = puskesmasTerpilih.alamat;
+muatDataPuskesmas();
 
 // ==========================================
-// 3. ISI PILIHAN POLI SECARA DINAMIS
+// 3. SUBMIT FORM ANTREAN KE DATABASE (via PHP + MySQL)
 // ==========================================
-const pilihPoliSelect = document.getElementById('pilihPoli');
-puskesmasTerpilih.poli.forEach(poli => {
-    const opsi = document.createElement('option');
-    opsi.value = poli;
-    opsi.textContent = poli;
-    pilihPoliSelect.appendChild(opsi);
-});
-
-// ==========================================
-// 4. LOGIKA PENGAMBILAN & GENERATE NOMOR ANTREAN
-// ==========================================
-document.getElementById('formAntrean').addEventListener('submit', function(e) {
+document.getElementById('formAntrean').addEventListener('submit', async function(e) {
     e.preventDefault(); // Mencegah reload halaman saat disubmit
 
     const namaPasien = document.getElementById('namaPasien').value;
-    const poliTerpilih = pilihPoliSelect.value;
-    
-    // Bikin kunci unik untuk database lokal localStorage agar nomor antrean per poli terpisah
-    // Format kunci: antrean_PuskesmasMelati_PoliUmum
-    const keyAntrean = `antrean_${puskesmasTerpilih.nama.replace(/\s+/g, '')}_${poliTerpilih.replace(/\s+/g, '')}`;
+    const poliTerpilih = document.getElementById('pilihPoli').value;
+    const keluhan = document.getElementById('keluhanPasien').value;
 
-    // Ambil nomor urut terakhir dari localStorage, kalau belum ada kita mulai dari 0
-    let nomorTerakhir = localStorage.getItem(keyAntrean);
-    nomorTerakhir = nomorTerakhir ? parseInt(nomorTerakhir) : 0;
+    try {
+        const response = await fetch('api/ambil_antrean.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                puskesmas_id: puskesmasId,
+                nama_poli: poliTerpilih,
+                nama_pasien: namaPasien,
+                keluhan: keluhan
+            })
+        });
+        const hasil = await response.json();
 
-    // Tambah 1 nomor urut baru secara otomatis (Auto-increment)
-    const nomorBaru = nomorTerakhir + 1;
+        if (!hasil.success) {
+            alert(hasil.message);
+            return;
+        }
 
-    // Simpan kembali nomor urut yang baru ke localStorage agar tersimpan permanen
-    localStorage.setItem(keyAntrean, nomorBaru);
+        const tiket = hasil.tiket;
+        tiketTerakhir = tiket; // simpan untuk dipakai fitur Email & WhatsApp
 
-    // ==========================================
-    // 5. CETAK TIKET ANTREAN DIGITAL DI LAYAR
-    document.getElementById('tiketPuskesmas').textContent = puskesmasTerpilih.nama;
-    document.getElementById('tiketPoli').textContent = poliTerpilih;
-    document.getElementById('tiketPasien').textContent = namaPasien;
-    
-    // Format nomor agar terlihat rapi (misal: 01, 02, atau 10)
-    document.getElementById('tiketNomor').textContent = nomorBaru < 10 ? `0${nomorBaru}` : nomorBaru;
-    
-    // Tampilkan waktu cetak saat ini
-    const waktuSekarang = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    document.getElementById('tiketJam').textContent = `Waktu Cetak: Hari Ini, Jam ${waktuSekarang} WIB`;
+        // Cetak tiket antrean digital di layar
+        document.getElementById('tiketPuskesmas').textContent = tiket.puskesmas;
+        document.getElementById('tiketPoli').textContent = tiket.poli;
+        document.getElementById('tiketPasien').textContent = tiket.pasien;
+        document.getElementById('tiketNomor').textContent = tiket.nomor < 10 ? `0${tiket.nomor}` : tiket.nomor;
+        document.getElementById('tiketJam').textContent = `Waktu Cetak: Hari Ini, Jam ${tiket.waktu} WIB`;
 
-    // Munculkan Box Tiket Digital (Menghapus class d-none dari Bootstrap)
-    document.getElementById('boxTiketAntrean').classList.remove('d-none');
+        // Munculkan Box Tiket Digital
+        document.getElementById('boxTiketAntrean').classList.remove('d-none');
 
-    // Reset isi form agar bisa dipakai daftar pasien lain jika mau
-    document.getElementById('formAntrean').reset();
-    
-    alert(`Berhasil mendaftar! Nomor Antrean Anda adalah: ${nomorBaru}`);
+        // Reset isi form
+        document.getElementById('formAntrean').reset();
+
+        alert(hasil.message);
+    } catch (error) {
+        alert("Gagal terhubung ke server. Pastikan Apache & MySQL di XAMPP sudah berjalan.");
+        console.error(error);
+    }
+});
+
+// ==========================================
+// 4. FITUR PIHAK KETIGA: CETAK TIKET KE PDF (html2pdf.js)
+// ==========================================
+document.getElementById('btnCetakPdf').addEventListener('click', function() {
+    const elemenTiket = document.getElementById('areaCetakTiket');
+    const namaFile = `Tiket-Antrean-${document.getElementById('tiketNomor').textContent}.pdf`;
+
+    const opsiPdf = {
+        margin: 0.3,
+        filename: namaFile,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'a5', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opsiPdf).from(elemenTiket).save();
+});
+
+// ==========================================
+// 5. FITUR PIHAK KETIGA: KIRIM TIKET VIA EMAIL (PHPMailer di backend)
+// ==========================================
+document.getElementById('btnKirimEmail').addEventListener('click', async function() {
+    const email = EMAIL_TUJUAN_TETAP;
+
+    if (!tiketTerakhir) {
+        alert('Belum ada tiket yang bisa dikirim.');
+        return;
+    }
+
+    const tombol = this;
+    tombol.disabled = true;
+    tombol.textContent = 'Mengirim...';
+
+    try {
+        const response = await fetch('api/kirim_email.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, ...tiketTerakhir })
+        });
+        const hasil = await response.json();
+        alert(hasil.message);
+    } catch (error) {
+        alert('Gagal terhubung ke server saat mengirim email.');
+        console.error(error);
+    } finally {
+        tombol.disabled = false;
+        tombol.textContent = '📧 Kirim Tiket ke Email';
+    }
+});
+
+// ==========================================
+// 6. FITUR PIHAK KETIGA: KIRIM TIKET VIA WHATSAPP (WhatsApp Click-to-Chat)
+// ==========================================
+document.getElementById('btnKirimWa').addEventListener('click', function() {
+    if (!tiketTerakhir) {
+        alert('Belum ada tiket yang bisa dikirim.');
+        return;
+    }
+
+    // Ubah format nomor: 08xxx -> 628xxx (format internasional yang dibutuhkan WhatsApp)
+    let nomorFormatted = WA_TUJUAN_TETAP.replace(/\D/g, ''); // buang karakter selain angka
+    if (nomorFormatted.startsWith('0')) {
+        nomorFormatted = '62' + nomorFormatted.slice(1);
+    }
+
+    const pesan =
+        `*TIKET ANTREAN DIGITAL - KANTPUSKU*\n\n` +
+        `Puskesmas: ${tiketTerakhir.puskesmas}\n` +
+        `Poli: ${tiketTerakhir.poli}\n` +
+        `Nomor Antrean: ${tiketTerakhir.nomor}\n` +
+        `Nama Pasien: ${tiketTerakhir.pasien}\n` +
+        `Waktu Cetak: Hari Ini, Jam ${tiketTerakhir.waktu} WIB\n\n` +
+        `Harap tunjukkan tiket ini kepada petugas loket.`;
+
+    const urlWa = `https://wa.me/${nomorFormatted}?text=${encodeURIComponent(pesan)}`;
+    window.open(urlWa, '_blank');
 });
