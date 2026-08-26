@@ -52,7 +52,12 @@ if (loginForm) {
 
             if (hasil.success) {
                 // Status login sekarang disimpan di session PHP (server), bukan sessionStorage
-                window.location.href = 'dashboard.html';
+                // Admin diarahkan ke panel admin, user biasa ke dashboard biasa
+                if (hasil.role === 'admin') {
+                    window.location.href = 'admin_dashboard.html';
+                } else {
+                    window.location.href = 'dashboard.html';
+                }
             }
         } catch (error) {
             alert('Gagal terhubung ke server. Pastikan Apache & MySQL di XAMPP sudah berjalan.');

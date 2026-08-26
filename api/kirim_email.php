@@ -26,12 +26,20 @@ if ($emailTujuan === '' || !filter_var($emailTujuan, FILTER_VALIDATE_EMAIL)) {
 
 // ==========================================
 // KONFIGURASI SMTP
-// Isi dengan akun email pengirim Anda (disarankan pakai App Password, bukan password biasa)
+// Kredensial diambil dari file .env (lihat config.php), BUKAN ditulis
+// langsung di sini, supaya tidak bocor kalau kode ini di-share/di-commit.
+// Isi file .env Anda (salin dari .env.example) dengan akun pengirim Anda
+// (disarankan pakai App Password Gmail, bukan password akun biasa).
 // ==========================================
-$smtpHost = 'smtp.gmail.com';
-$smtpUser = 'ohd8094@gmail.com'; // GANTI dengan email Anda
-$smtpPass = 'vknpnqactqvzwgyx';             // GANTI dengan App Password Gmail Anda
-$smtpPort = 587;
+$smtpHost = getenv('SMTP_HOST') ?: 'smtp.gmail.com';
+$smtpUser = getenv('SMTP_USER') ?: '';
+$smtpPass = getenv('SMTP_PASS') ?: '';
+$smtpPort = (int) (getenv('SMTP_PORT') ?: 587);
+
+if ($smtpUser === '' || $smtpPass === '') {
+    echo json_encode(['success' => false, 'message' => 'Konfigurasi SMTP belum diatur di server (.env kosong). Hubungi admin sistem.']);
+    exit;
+}
 
 $mail = new PHPMailer(true);
 

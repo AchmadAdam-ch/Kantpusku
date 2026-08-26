@@ -14,7 +14,7 @@ let tiketTerakhir = null;
 // (sesuai ketetapan project, tidak perlu diisi manual oleh pengguna)
 // ==========================================
 const EMAIL_TUJUAN_TETAP = 'ohd8094@gmail.com';
-const WA_TUJUAN_TETAP = '089653737422';
+const WA_TUJUAN_TETAP = '08980500898';
 
 // ==========================================
 // 2. AMBIL DATA PUSKESMAS DARI DATABASE (via PHP + MySQL)
@@ -104,6 +104,9 @@ document.getElementById('formAntrean').addEventListener('submit', async function
         // Munculkan Box Tiket Digital
         document.getElementById('boxTiketAntrean').classList.remove('d-none');
 
+        // Mulai countdown real-time berdasarkan status awal dari server
+        mulaiCountdown(tiket.id, tiket.status, tiket.sisa_detik, tiket.posisi_menunggu);
+
         // Reset isi form
         document.getElementById('formAntrean').reset();
 
@@ -191,3 +194,90 @@ document.getElementById('btnKirimWa').addEventListener('click', function() {
     const urlWa = `https://wa.me/${nomorFormatted}?text=${encodeURIComponent(pesan)}`;
     window.open(urlWa, '_blank');
 });
+
+// ==========================================
+// 7. COUNTDOWN REAL-TIME (MENIT & DETIK) UNTUK STATUS ANTREAN
+// - Tiap 1 detik: hitung mundur tampilan secara lokal (biar terasa halus).
+// - Tiap 5 detik: sinkronisasi ulang ke server (biar akurat walau ada pasien
+//   lain yang statusnya berubah, atau kalau layar sempat idle lama).
+// ==========================================
+let timerLokal = null;
+let timerSinkron = null;
+let sisaDetikSaatIni = 0;
+let statusSaatIni = null;
+
+function formatMenitDetik(totalDetik) {
+    const menit = Math.floor(totalDetik / 60);
+    const detik = totalDetik % 60;
+    return `${String(menit).padStart(2, '0')}:${String(detik).padStart(2, '0')}`;
+}
+
+function renderStatusAntrean(status, sisaDetik, posisiMenunggu) {
+    const badge = document.getElementById('tiketStatusBadge');
+    const box = document.getElementById('tiketCountdownBox');
+    const label = document.getElementById('tiketCountdownLabel');
+    const angka = document.getElementById('tiketCountdown');
+
+    if (status === 'dipanggil') {
+        badge.textContent = '🟢 Sedang Dipanggil - Silakan Masuk';
+        badge.className = 'badge fs-6 mb-3 bg-success';
+        box.classList.remove('d-none');
+        label.textContent = 'Sisa waktu pelayanan Anda:';
+        angka.textContent = formatMenitDetik(sisaDetik);
+    } else if (status === 'menunggu') {
+        badge.textContent = `🟡 Menunggu (Posisi ke-${posisiMenunggu})`;
+        badge.className = 'badge fs-6 mb-3 bg-warning text-dark';
+        box.classList.remove('d-none');
+        label.textContent = 'Estimasi waktu tunggu Anda:';
+        angka.textContent = formatMenitDetik(sisaDetik);
+    } else {
+        badge.textContent = '⚪ Selesai Dilayani';
+        badge.className = 'badge fs-6 mb-3 bg-secondary';
+        box.classList.add('d-none');
+    }
+}
+
+function mulaiCountdown(antreanId, statusAwal, sisaDetikAwal, posisiMenungguAwal) {
+    // Hentikan timer lama kalau sebelumnya sudah pernah mendaftar di sesi ini
+    if (timerLokal) clearInterval(timerLokal);
+    if (timerSinkron) clearInterval(timerSinkron);
+
+    statusSaatIni = statusAwal;
+    sisaDetikSaatIni = sisaDetikAwal;
+    renderStatusAntrean(statusSaatIni, sisaDetikSaatIni, posisiMenungguAwal);
+
+    // Detak lokal tiap detik: sekadar menghitung mundur angka di layar
+    timerLokal = setInterval(function () {
+        if (statusSaatIni === 'selesai') return;
+        sisaDetikSaatIni = Math.max(0, sisaDetikSaatIni - 1);
+        renderStatusAntrean(statusSaatIni, sisaDetikSaatIni, posisiMenungguAwal);
+    }, 1000);
+
+    // Sinkronisasi ke server tiap 5 detik: sumber kebenaran yang sesungguhnya
+    async function sinkronKeServer() {
+        try {
+            const response = await fetch(`api/status_antrean.php?id=${antreanId}`);
+            const hasil = await response.json();
+            if (!hasil.success) return;
+
+            const statusBerubahJadiDipanggil = statusSaatIni === 'menunggu' && hasil.status === 'dipanggil';
+
+            statusSaatIni = hasil.status;
+            sisaDetikSaatIni = hasil.sisa_detik;
+            posisiMenungguAwal = hasil.posisi_menunggu;
+            renderStatusAntrean(statusSaatIni, sisaDetikSaatIni, posisiMenungguAwal);
+
+            if (statusBerubahJadiDipanggil) {
+                alert('Giliran Anda sudah dipanggil! Silakan segera masuk ke poli.');
+            }
+
+            if (statusSaatIni === 'selesai') {
+                clearInterval(timerLokal);
+                clearInterval(timerSinkron);
+            }
+        } catch (error) {
+            console.error('Gagal sinkronisasi status antrean:', error);
+        }
+    }
+    timerSinkron = setInterval(sinkronKeServer, 5000);
+}

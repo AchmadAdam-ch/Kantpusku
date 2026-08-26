@@ -12,6 +12,12 @@ async function cekSesiLogin() {
             return;
         }
 
+        // Kalau yang login ternyata Admin, arahkan ke panel admin (bukan dashboard user biasa)
+        if (hasil.role === 'admin') {
+            window.location.href = 'admin_dashboard.html';
+            return;
+        }
+
         // Tampilkan nama user di Navbar
         document.getElementById('welcomeUser').textContent = `Halo, ${hasil.username}!`;
     } catch (error) {
